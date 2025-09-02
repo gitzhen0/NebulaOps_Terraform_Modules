@@ -174,7 +174,7 @@ data "aws_iam_policy_document" "cp_policy" {
 
   statement {
     sid       = "UseConnection"
-    actions   = ["codestar-connections:UseConnection"]
+    actions   = ["codeconnections:UseConnection"]
     resources = [var.backend_github_connection_arn]
   }
 }
