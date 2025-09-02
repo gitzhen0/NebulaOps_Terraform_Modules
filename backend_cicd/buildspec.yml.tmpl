@@ -1,0 +1,43 @@
+version: 0.2
+env: { shell: bash }
+
+phases:
+  install:
+    commands:
+      - echo ">>> Install jq if missing"
+      - which jq || (yum -y install jq || (apt-get update && apt-get install -y jq) || true)
+  pre_build:
+    commands:
+      - echo ">>> Login ECR"
+      - AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - aws ecr get-login-password | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - IMAGE_TAG=$(echo "${CODEBUILD_RESOLVED_SOURCE_VERSION:-manual}" | cut -c1-7)
+      - echo "IMAGE_TAG=$IMAGE_TAG"
+      - get_repo() { echo "$ECR_REPOS_JSON" | jq -r --arg s "$1" '.[$s]'; }
+  build:
+    commands:
+      - echo ">>> Build & push images"
+      - IFS=',' read -ra SVC_ARR <<< "$BACKEND_SERVICE_NAMES"
+      - declare -A MANIFEST
+      - |
+        for svc in "${SVC_ARR[@]}"; do
+          repo="$(get_repo "$svc")"
+          if [[ -z "$repo" || "$repo" == "null" ]]; then echo "skip $svc (no ECR)"; continue; fi
+          echo "--- [$svc] -> $repo:$IMAGE_TAG"
+          docker build -f Dockerfile --build-arg MODULE="$svc" -t "$repo:$IMAGE_TAG" .
+          docker push "$repo:$IMAGE_TAG"
+          MANIFEST["$svc"]="$repo:$IMAGE_TAG"
+        done
+      - |
+        echo ">>> Write images.json"
+        {
+          echo '{'; first=1
+          for k in "${!MANIFEST[@]}"; do
+            [[ $first -eq 1 ]] || echo ','
+            printf '  "%s": "%s"' "$k" "${MANIFEST[$k]}"; first=0
+          done
+          echo; echo '}'
+        } > images.json
+        cat images.json
+artifacts:
+  files: [ "images.json" ]
