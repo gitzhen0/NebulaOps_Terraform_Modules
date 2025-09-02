@@ -11,7 +11,7 @@ data "aws_caller_identity" "me" {}
 # 1) S3（仅 CloudFront 读，开启版本化与加密）
 resource "aws_s3_bucket" "site" {
   bucket = local.bucket_name
-  force_destroy = var.frontend_force_destroy_bucket
+  force_destroy = var.force_destroy_bucket
 }
 
 resource "aws_s3_bucket_public_access_block" "site" {
@@ -187,7 +187,7 @@ resource "aws_route53_record" "aaaa" {
 
 # 7) GitHub OIDC Provider（可选创建）
 resource "aws_iam_openid_connect_provider" "github" {
-  count           = var.frontend_create_github_oidc_provider ? 1 : 0
+  count           = var.create_github_oidc_provider ? 1 : 0
   url             = "https://token.actions.githubusercontent.com"
   client_id_list  = ["sts.amazonaws.com"]
   # 注：多数账户已不需手动维护指纹；若需要可保留 GitHub 公告中的指纹
@@ -202,7 +202,7 @@ data "aws_iam_policy_document" "gh_trust" {
     principals {
       type = "Federated"
       identifiers = [
-        var.frontend_create_github_oidc_provider
+        var.create_github_oidc_provider
           ? aws_iam_openid_connect_provider.github[0].arn
           : "arn:aws:iam::${data.aws_caller_identity.me.account_id}:oidc-provider/token.actions.githubusercontent.com"
       ]
@@ -215,7 +215,7 @@ data "aws_iam_policy_document" "gh_trust" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.frontend_github_owner}/${var.frontend_github_repo}:ref:refs/heads/${var.frontend_github_branch}"]
+      values   = ["repo:${var.github_owner}/${var.github_repo}:ref:refs/heads/${var.github_branch}"]
     }
   }
 }
