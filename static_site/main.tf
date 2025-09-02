@@ -11,6 +11,7 @@ data "aws_caller_identity" "me" {}
 # 1) S3（仅 CloudFront 读，开启版本化与加密）
 resource "aws_s3_bucket" "site" {
   bucket = local.bucket_name
+  force_destroy = var.force_destroy_bucket
 }
 
 resource "aws_s3_bucket_public_access_block" "site" {

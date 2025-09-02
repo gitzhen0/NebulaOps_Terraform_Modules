@@ -13,3 +13,8 @@ variable "create_github_oidc_provider" {
     type = bool 
     default = true 
 }
+
+variable "force_destroy_bucket" {
+    type = bool
+    default = false
+}
