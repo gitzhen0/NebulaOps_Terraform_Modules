@@ -173,8 +173,11 @@ data "aws_iam_policy_document" "cp_policy" {
   }
 
   statement {
-    sid       = "UseConnection"
-    actions   = ["codeconnections:UseConnection"]
+    sid       = "UseGitConnection"
+    actions   = [
+      "codeconnections:UseConnection",
+      "codeconnections:GetConnection"   # 兼容性补充，避免元数据读取报限权
+    ]
     resources = [var.backend_github_connection_arn]
   }
 }
