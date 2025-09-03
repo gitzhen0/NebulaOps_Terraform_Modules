@@ -9,38 +9,23 @@ provider "aws" {
 }
 
 locals {
-  services        = var.backend_service_names
-  default_subject = "repo:${var.backend_github_owner}/${var.backend_github_repo}:ref:refs/heads/${var.backend_github_branch}"
-  allowed_subjects = length(var.backend_allowed_subjects) > 0 ? var.backend_allowed_subjects : [local.default_subject]
+  services   = var.backend_service_names
+  repo_names = [for s in local.services : "${var.backend_ecr_repo_prefix}/${s}"]
 }
 
-# -------- GitHub OIDC Provider（可选择创建） --------
+# ---- GitHub OIDC Provider（可选创建） ----
 resource "aws_iam_openid_connect_provider" "github" {
   count           = var.backend_create_oidc_provider ? 1 : 0
   url             = "https://token.actions.githubusercontent.com"
   client_id_list  = ["sts.amazonaws.com"]
-  # GitHub OIDC 根证书指纹（DigiCert Global Root G2）
-  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
+  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"] # GitHub OIDC CA
 }
 
 locals {
-  oidc_provider_arn = var.backend_create_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : var.backend_oidc_provider_arn
+  oidc_provider_arn = var.backend_create_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : var.backend_existing_oidc_provider_arn
 }
 
-# -------- ECR 仓库 --------
-resource "aws_ecr_repository" "svc" {
-  for_each             = toset(local.services)
-  name                 = "${var.backend_ecr_repo_prefix}/${each.key}"
-  image_tag_mutability = "MUTABLE"
-  image_scanning_configuration { scan_on_push = true }
-}
-
-locals {
-  ecr_repo_arns = { for k, r in aws_ecr_repository.svc : k => r.arn }
-  ecr_repo_urls = { for k, r in aws_ecr_repository.svc : k => r.repository_url }
-}
-
-# -------- GitHub Actions Assume 的 IAM 角色 --------
+# ---- IAM Role 给 GitHub Actions 假设（OIDC）----
 data "aws_iam_policy_document" "gha_assume" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -53,44 +38,58 @@ data "aws_iam_policy_document" "gha_assume" {
       variable = "token.actions.githubusercontent.com:aud"
       values   = ["sts.amazonaws.com"]
     }
+    # 限制到具体仓库 + 分支
     condition {
-      test     = "StringLike"
+      test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = local.allowed_subjects
+      values   = ["repo:${var.backend_github_owner}/${var.backend_github_repo}:ref:refs/heads/${var.backend_github_branch}"]
     }
   }
 }
 
-resource "aws_iam_role" "gha_ecr_role" {
-  name               = "${var.backend_project_name}-gha-ecr-role"
+resource "aws_iam_role" "gha_push_ecr" {
+  name               = "${var.backend_project_name}-backend-gha-ecr-role"
   assume_role_policy = data.aws_iam_policy_document.gha_assume.json
 }
 
-# 仅限于推送到我们创建的这些 ECR 仓库
-data "aws_iam_policy_document" "gha_ecr_policy" {
+# ---- ECR 仓库们 ----
+resource "aws_ecr_repository" "svc" {
+  for_each             = toset(local.services)
+  name                 = "${var.backend_ecr_repo_prefix}/${each.key}"
+  image_tag_mutability = "MUTABLE"
+  image_scanning_configuration { scan_on_push = true }
+  encryption_configuration { encryption_type = "AES256" }
+  force_delete = true
+}
+
+# ---- 允许此角色 Push / Pull 到上述 ECR ----
+data "aws_iam_policy_document" "ecr_push" {
   statement {
-    sid     = "ECRGetAuth"
+    sid     = "AuthToken"
     actions = ["ecr:GetAuthorizationToken"]
     resources = ["*"]
   }
+
   statement {
-    sid     = "ECRPushPullSpecificRepos"
+    sid = "EcrRepoScoped"
     actions = [
-      "ecr:BatchCheckLayerAvailability","ecr:CompleteLayerUpload","ecr:UploadLayerPart",
-      "ecr:InitiateLayerUpload","ecr:PutImage","ecr:BatchGetImage","ecr:GetDownloadUrlForLayer",
-      "ecr:DescribeRepositories","ecr:ListImages"
+      "ecr:BatchCheckLayerAvailability","ecr:CompleteLayerUpload",
+      "ecr:UploadLayerPart","ecr:InitiateLayerUpload","ecr:PutImage",
+      "ecr:BatchGetImage","ecr:GetDownloadUrlForLayer","ecr:DescribeRepositories",
+      "ecr:ListImages","ecr:DescribeImages","ecr:BatchDeleteImage"
     ]
-    resources = values(local.ecr_repo_arns)
+    resources = [for r in aws_ecr_repository.svc : r.arn]
   }
+
   statement {
-    sid     = "STSCallerIdentity"
+    sid     = "StsRead"
     actions = ["sts:GetCallerIdentity"]
     resources = ["*"]
   }
 }
 
-resource "aws_iam_role_policy" "gha_ecr_inline" {
-  role   = aws_iam_role.gha_ecr_role.id
-  name   = "${var.backend_project_name}-gha-ecr-policy"
-  policy = data.aws_iam_policy_document.gha_ecr_policy.json
+resource "aws_iam_role_policy" "ecr_push_inline" {
+  role   = aws_iam_role.gha_push_ecr.id
+  name   = "${var.backend_project_name}-backend-gha-ecr-policy"
+  policy = data.aws_iam_policy_document.ecr_push.json
 }

@@ -3,45 +3,37 @@ variable "backend_aws_region" {
   type        = string
 }
 
-# GitHub 仓库（发起 Actions 的后端 repo）
-variable "backend_github_owner"  { type = string }
-variable "backend_github_repo"   { type = string }
-variable "backend_github_branch" { type = string }
+# GitHub 仓库（用于 OIDC 信任条件）
+variable "backend_github_owner"  { type = string } # 例如 gitzhen0
+variable "backend_github_repo"   { type = string } # 例如 microshop_backend
+variable "backend_github_branch" { type = string } # 例如 main
 
-# 要创建的 ECR 仓库（一个服务一个仓库）
-variable "backend_service_names" {
-  description = "微服务目录名列表（与 repo 中的模块目录一致）"
-  type        = list(string)
-  default     = ["api-gateway", "users-service", "orders-service", "inventory-service"]
-}
-
-variable "backend_ecr_repo_prefix" {
-  description = "ECR 仓库前缀，最终名为 <prefix>/<service>"
-  type        = string
-  default     = "microshop"
-}
-
-# 是否由本模块创建 GitHub OIDC Provider（一个账户一般只需要建一次）
+# 是否在此模块内创建 GitHub OIDC Provider（如果账户里已有，可设为 false 并传入现有 ARN）
 variable "backend_create_oidc_provider" {
   type    = bool
   default = true
 }
 
-# 若账户里已存在 GitHub OIDC Provider，可把 ARN 传进来并把上面开关设为 false
-variable "backend_oidc_provider_arn" {
-  type    = string
-  default = ""
-}
-
-# 允许的 subject（可留空用默认：限定某个分支）
-variable "backend_allowed_subjects" {
-  description = "可 AssumeRole 的 GitHub OIDC subject 列表"
-  type        = list(string)
-  default     = []
-}
-
-variable "backend_project_name" {
-  description = "命名前缀（如 dev / prod）"
+variable "backend_existing_oidc_provider_arn" {
   type        = string
-  default     = "dev"
+  default     = ""
+  description = "已有 OIDC Provider ARN（backend_create_oidc_provider=false 时必填）"
+}
+
+# 要创建的 ECR 仓库（默认四个微服务）
+variable "backend_service_names" {
+  type        = list(string)
+  default     = ["api-gateway", "users-service", "orders-service", "inventory-service"]
+}
+
+variable "backend_ecr_repo_prefix" {
+  description = "ECR repo 前缀，最终为 <prefix>/<service>"
+  type        = string
+  default     = "microshop"
+}
+
+# 命名前缀（可放 env 名称，如 dev / prod）
+variable "backend_project_name" {
+  type    = string
+  default = "dev"
 }
